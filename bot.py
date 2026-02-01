@@ -12,6 +12,7 @@ import random
 import string
 import threading
 import time
+import re
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -26,6 +27,12 @@ MESSAGES_GIF_URL = "https://cdn.discordapp.com/attachments/1467306702742229100/1
 
 # LXC Storage Pool
 DEFAULT_STORAGE_POOL = "default"
+DEFAULT_IMAGE = "images:debian/13"
+# Supported OS versions whitelist
+SUPPORTED_OS = {
+    'debian': ['11', '12', '13'],
+    'ubuntu': ['18.04', '20.04', '22.04', '23.10']
+}
 
 # Crystal Cloud Blue theme colors
 COLOR_PRIMARY = 0x5dade2    # Crystal Blue
@@ -298,9 +305,11 @@ async def set_root_disk_size(container_name: str, size_gb: int):
         logger.warning(f"Automatic filesystem grow may have failed in {container_name}: {e}")
 
 # Core create function
-async def core_create_container(container_name: str, ram_gb: int, cpu: int, storage_gb: int, storage_pool: str = None):
+async def core_create_container(container_name: str, ram_gb: int, cpu: int, storage_gb: int, storage_pool: str = None, image: str = None):
     if storage_pool is None:
         storage_pool = DEFAULT_STORAGE_POOL
+    if image is None:
+        image = DEFAULT_IMAGE
     
     try:
         ram_mb = int(ram_gb) * 1024
@@ -309,7 +318,7 @@ async def core_create_container(container_name: str, ram_gb: int, cpu: int, stor
         max_retries = 3
         for attempt in range(max_retries):
             try:
-                await execute_lxc(f"lxc launch images:debian/12 {container_name} --config limits.memory={ram_mb}MB --config limits.cpu={cpu} -s {storage_pool}", timeout=600)
+                await execute_lxc(f"lxc launch {image} {container_name} --config limits.memory={ram_mb}MB --config limits.cpu={cpu} -s {storage_pool}", timeout=600)
                 break
             except Exception as e:
                 if attempt == max_retries - 1:
@@ -367,6 +376,21 @@ def generate_container_name():
     prefix = "vps"
     random_chars = ''.join(random.choices(string.ascii_lowercase + string.digits, k=8))
     return f"{prefix}-{random_chars}"
+
+
+def sanitize_owner_name(name: str) -> str:
+    # lowercase, replace spaces with hyphens, keep a-z0-9 and hyphens
+    s = name.lower().replace(' ', '-')
+    s = re.sub(r'[^a-z0-9\-]', '', s)
+    # trim repeated hyphens
+    s = re.sub(r'-{2,}', '-', s).strip('-')
+    return s or 'user'
+
+
+def generate_named_container_name(owner_name: str, index: int) -> str:
+    owner = sanitize_owner_name(owner_name)
+    # produce lowercase-safe container name
+    return f"vortexnodes-{owner}-{index}"
 
 # MESSAGE REWARD SYSTEM
 @bot.event
@@ -791,7 +815,10 @@ async def buy_with_credits(ctx, plan_name: str = None):
             
             user_data[user_id]['credits'] -= credit_cost
             
-            container_name = generate_container_name()
+            # name container using owner and their vps count
+            owner_name = ctx.author.name
+            count = len(vps_data.get(user_id, [])) + 1
+            container_name = generate_named_container_name(owner_name, count)
             try:
                 await core_create_container(
                     container_name=container_name,
@@ -813,7 +840,12 @@ async def buy_with_credits(ctx, plan_name: str = None):
                     'status': 'running',
                     'created_at': datetime.now().isoformat()
                 }
-                
+                # store image/os in vps info
+                try:
+                    vps_info['image'] = vps_info.get('image', DEFAULT_IMAGE)
+                    vps_info['os'] = vps_info.get('os', DEFAULT_IMAGE.replace('images:', ''))
+                except:
+                    pass
                 vps_data[user_id].append(vps_info)
                 save_data()
                 
@@ -869,11 +901,21 @@ async def buy_with_credits(ctx, plan_name: str = None):
     await ctx.send(embed=confirm_embed, view=ConfirmView())
 
 @bot.command(name='manage')
-async def manage_vps(ctx):
-    user_id = str(ctx.author.id)
+async def manage_vps(ctx, member: discord.Member = None):
+    # If member is provided, only allow admins to manage other users' VPS
+    if member:
+        caller_id = str(ctx.author.id)
+        if not (caller_id == str(MAIN_ADMIN_ID) or caller_id in admin_data.get('admins', [])):
+            await ctx.send(embed=create_error_embed("Access Denied", "You don't have permission to manage other users' VPS."))
+            return
+        user_id = str(member.id)
+        target_name = member.name
+    else:
+        user_id = str(ctx.author.id)
+        target_name = ctx.author.name
     
     if user_id not in vps_data or not vps_data[user_id]:
-        await ctx.send(embed=create_error_embed("No VPS Found", "You don't have any VPS. Use `.plans` to view available plans."))
+        await ctx.send(embed=create_error_embed("No VPS Found", "This user has no VPS. Use `.plans` to view available plans."))
         return
     
     embed = create_embed("🛠️ Manage Your VPS", "Select a VPS to manage:", COLOR_INFO)
@@ -882,9 +924,10 @@ async def manage_vps(ctx):
         status_emoji = "🟢" if vps.get('status') == 'running' else "🔴"
         embed.add_field(
             name=f"#{i} {status_emoji} {vps.get('name', 'Unnamed')}",
-            value=f"**Plan:** {vps.get('plan', 'N/A')}\n"
-                  f"**Container:** `{vps['container_name']}`\n"
-                  f"**Status:** {vps.get('status', 'unknown')}\n"
+            value=f"**Plan:** {vps.get('plan', 'N/A')}
+                  f"**Container:** `{vps['container_name']}`
+                  f"**Status:** {vps.get('status', 'unknown')}
+                  f"**OS:** {vps.get('os', vps.get('image', 'Unknown'))}\n"
                   f"**Specs:** {vps.get('ram', 'N/A')} RAM, {vps.get('cpu', 'N/A')} CPU, {vps.get('storage', 'N/A')}GB",
             inline=False
         )
@@ -1802,7 +1845,9 @@ async def admin_create(ctx, member: discord.Member = None, plan_name: str = "Sta
     
     plan_details = PLANS[plan_name]
     
-    container_name = generate_container_name()
+    # name container using owner and their vps count
+    count = len(vps_data.get(user_id, [])) + 1
+    container_name = generate_named_container_name(member.name, count)
     try:
         await core_create_container(
             container_name=container_name,
@@ -1844,6 +1889,12 @@ async def admin_create(ctx, member: discord.Member = None, plan_name: str = "Sta
             value=f"**RAM:** {plan_details['ram']}\n"
                   f"**CPU:** {plan_details['cpu']} cores\n"
                   f"**Storage:** {plan_details['storage']}GB", inline=False)
+        # store image/os in vps info
+        try:
+            vps_info['image'] = vps_info.get('image', DEFAULT_IMAGE)
+            vps_info['os'] = vps_info.get('os', DEFAULT_IMAGE.replace('images:', ''))
+        except:
+            pass
         
         await ctx.send(embed=success_embed)
         
@@ -1853,6 +1904,221 @@ async def admin_create(ctx, member: discord.Member = None, plan_name: str = "Sta
             "Creation Failed",
             f"Failed to create VPS: {str(e)[:100]}"
         ))
+
+
+@bot.command(name='deploy')
+@is_admin()
+async def deploy(ctx, member: discord.Member = None, cpu: int = None, ram_gb: int = None, storage_gb: int = None, os_choice: str = None, version: str = None):
+    """Admin-only: .deploy @user <cpu> <ram_gb> <storage_gb> <debian|ubuntu> [version]
+    Creates a custom VPS for the mentioned user with specified resources and OS. Plan will be named 'Custom'.
+    """
+    if not member or cpu is None or ram_gb is None or storage_gb is None or not os_choice:
+        await ctx.send(embed=create_error_embed("Usage", "`.deploy @user <cpu> <ram_gb> <storage_gb> <debian|ubuntu> [version]`"))
+        return
+
+    user_id = str(member.id)
+    if user_id not in user_data:
+        user_data[user_id] = {"credits": 0, "messages": 0}
+
+    os_name = os_choice.lower()
+    if os_name.startswith('ubuntu'):
+        ver = version or SUPPORTED_OS['ubuntu'][-1]
+        os_key = 'ubuntu'
+    elif os_name.startswith('debian'):
+        ver = version or SUPPORTED_OS['debian'][-1]
+        os_key = 'debian'
+    else:
+        await ctx.send(embed=create_error_embed("Invalid OS", "Supported OS: `ubuntu` or `debian`"))
+        return
+
+    # whitelist check
+    if ver not in SUPPORTED_OS.get(os_key, []):
+        await ctx.send(embed=create_error_embed("Unsupported Version", f"Supported {os_key} versions: {', '.join(SUPPORTED_OS.get(os_key, []))}"))
+        return
+
+    image = f"images:{os_key}/{ver}"
+
+    # confirmation view
+    confirm_embed = create_embed("⚙️ Deploy Confirmation", f"Create Custom VPS for {member.mention}?\n\n**CPU:** {cpu}\n**RAM:** {ram_gb}GB\n**Storage:** {storage_gb}GB\n**OS:** {os_key.capitalize()} {ver}\n\nPlan: Custom")
+
+    class DeployConfirmView(discord.ui.View):
+        def __init__(self):
+            super().__init__(timeout=60)
+
+        @discord.ui.button(label="✅ Confirm", style=discord.ButtonStyle.success)
+        async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button):
+            if interaction.user.id != ctx.author.id:
+                await interaction.response.send_message("This is not your action!", ephemeral=True)
+                return
+            await interaction.response.defer()
+
+            # create container
+            count = len(vps_data.get(user_id, [])) + 1
+            container_name = generate_named_container_name(member.name, count)
+            try:
+                await core_create_container(container_name=container_name, ram_gb=ram_gb, cpu=cpu, storage_gb=storage_gb, image=image)
+
+                if user_id not in vps_data:
+                    vps_data[user_id] = []
+
+                vps_info = {
+                    'name': 'Custom VPS',
+                    'container_name': container_name,
+                    'plan': 'Custom',
+                    'ram': f"{ram_gb}GB",
+                    'cpu': str(cpu),
+                    'storage': storage_gb,
+                    'status': 'running',
+                    'created_at': datetime.now().isoformat(),
+                    'image': image,
+                    'os': f"{os_key.capitalize()} {ver}"
+                }
+
+                vps_data[user_id].append(vps_info)
+                save_data()
+
+                try:
+                    vps_role = await get_or_create_vps_role(ctx.guild)
+                    if vps_role:
+                        await member.add_roles(vps_role)
+                except:
+                    pass
+
+                await interaction.followup.send(embed=create_success_embed("Deployed", f"Custom VPS created for {member.mention} as `{container_name}`"))
+                try:
+                    await member.send(embed=create_success_embed("Your VPS Is Ready", f"A custom VPS has been created for you: `{container_name}`\nPlan: Custom\nOS: {os_key.capitalize()} {ver}\nRAM: {ram_gb}GB\nCPU: {cpu}\nStorage: {storage_gb}GB"))
+                except discord.Forbidden:
+                    pass
+
+            except Exception as e:
+                logger.exception(f"Deploy failed: {e}")
+                await interaction.followup.send(embed=create_error_embed("Deploy Failed", str(e)))
+
+            self.stop()
+
+        @discord.ui.button(label="❌ Cancel", style=discord.ButtonStyle.danger)
+        async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
+            if interaction.user.id != ctx.author.id:
+                await interaction.response.send_message("This is not your action!", ephemeral=True)
+                return
+            await interaction.response.edit_message(embed=create_info_embed("Cancelled", "Deployment cancelled."), view=None)
+            self.stop()
+
+    await ctx.send(embed=confirm_embed, view=DeployConfirmView())
+
+
+@bot.command(name='switchos')
+@is_admin()
+async def switch_os(ctx, member: discord.Member = None, vps_number: int = None, os_choice: str = None, version: str = None):
+    """Admin command: .switchos @user <vps_number> <ubuntu|debian> [version]
+    Deletes the current container and recreates it with the selected OS image.
+    """
+    if not member or vps_number is None or not os_choice:
+        await ctx.send(embed=create_error_embed("Usage", "`.switchos @user <vps_number> <ubuntu|debian> [version]`"))
+        return
+
+    user_id = str(member.id)
+    if user_id not in vps_data or not vps_data[user_id]:
+        await ctx.send(embed=create_error_embed("No VPS Found", "This user has no VPS."))
+        return
+
+    try:
+        idx = int(vps_number) - 1
+    except Exception:
+        await ctx.send(embed=create_error_embed("Invalid Number", "vps_number must be a number."))
+        return
+
+    if idx < 0 or idx >= len(vps_data[user_id]):
+        await ctx.send(embed=create_error_embed("Invalid Number", f"Please choose 1-{len(vps_data[user_id])}"))
+        return
+
+    os_name = os_choice.lower()
+    if os_name.startswith('ubuntu'):
+        ver = version or SUPPORTED_OS['ubuntu'][-1]
+        os_key = 'ubuntu'
+    elif os_name.startswith('debian'):
+        ver = version or SUPPORTED_OS['debian'][-1]
+        os_key = 'debian'
+    else:
+        await ctx.send(embed=create_error_embed("Invalid OS", "Supported OS: `ubuntu` or `debian`"))
+        return
+
+    # whitelist check
+    if ver not in SUPPORTED_OS.get(os_key, []):
+        await ctx.send(embed=create_error_embed("Unsupported Version", f"Supported {os_key} versions: {', '.join(SUPPORTED_OS.get(os_key, []))}"))
+        return
+
+    image = f"images:{os_key}/{ver}"
+
+    vps = vps_data[user_id][idx]
+    container_name = vps.get('container_name')
+    if not container_name:
+        await ctx.send(embed=create_error_embed("No Container", "Selected VPS has no container name recorded."))
+        return
+
+    confirm_embed = create_embed("⚠️ Switch OS Confirmation", f"Reinstall `{container_name}` for {member.mention} as {os_key.capitalize()} {ver}?\n\nThis will DELETE the existing container and recreate it. Data will be lost.")
+
+    class SwitchConfirmView(discord.ui.View):
+        def __init__(self):
+            super().__init__(timeout=60)
+
+        @discord.ui.button(label="🗑️ Confirm & Reinstall", style=discord.ButtonStyle.danger)
+        async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button):
+            if interaction.user.id != ctx.author.id:
+                await interaction.response.send_message("This is not your action!", ephemeral=True)
+                return
+            await interaction.response.defer()
+
+            try:
+                # Attempt to stop and delete the existing container
+                try:
+                    await execute_lxc(f"lxc stop {container_name} --force", timeout=60)
+                except Exception:
+                    pass
+                try:
+                    await execute_lxc(f"lxc delete {container_name} --force", timeout=120)
+                except Exception:
+                    pass
+
+                # Recreate with same resources
+                try:
+                    ram_gb = int(str(vps.get('ram', '4GB')).replace('GB', ''))
+                except:
+                    ram_gb = 4
+                try:
+                    cpu = int(vps.get('cpu', 1))
+                except:
+                    cpu = 1
+                try:
+                    storage_gb = int(vps.get('storage', 20))
+                except:
+                    storage_gb = 20
+
+                await core_create_container(container_name=container_name, ram_gb=ram_gb, cpu=cpu, storage_gb=storage_gb, image=image)
+
+                # Update vps metadata
+                vps['image'] = image
+                vps['os'] = f"{os_key.capitalize()} {ver}"
+                vps['status'] = 'running'
+                vps['created_at'] = datetime.now().isoformat()
+                save_data()
+
+                await interaction.followup.send(embed=create_success_embed("✅ OS Switched", f"`{container_name}` has been reinstalled with {os_key.capitalize()} {ver}."))
+            except Exception as e:
+                logger.exception(f"OS switch failed: {e}")
+                await interaction.followup.send(embed=create_error_embed("Failed", str(e)))
+
+            self.stop()
+
+        @discord.ui.button(label="❌ Cancel", style=discord.ButtonStyle.secondary)
+        async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
+            if interaction.user.id != ctx.author.id:
+                await interaction.response.send_message("This is not your action!", ephemeral=True)
+                return
+            await interaction.response.edit_message(embed=create_info_embed("Cancelled", "OS switch cancelled."), view=None)
+            self.stop()
+
+    await ctx.send(embed=confirm_embed, view=SwitchConfirmView())
 
 @bot.command(name='adminc')
 @is_admin()
