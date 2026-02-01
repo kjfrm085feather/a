@@ -35,10 +35,10 @@ COLOR_INFO = 0x85c1e9       # Light Crystal Blue
 COLOR_WARNING = 0xaed6f1    # Soft Cloud Blue
 
 # Payment Configuration
-PAYMENT_ADDRESS = "0x5D20d7d185f0B83039BaBFf980F1755B5242C85B"
+PAYMENT_ADDRESS = "0xdD3fD907D20fb2C8Ec16Bc6358301f258432998A"
 PAYMENT_METHODS = {
-    "Bitcoin": "bc1qfashd8xz6y84j5hd8ycnsx9x5fzujr952qctuz",
-    "Ethereum": "0x5D20d7d185f0B83039BaBFf980F1755B5242C85B",
+    "Bitcoin": "bc1qmeykm3f3wla6caupc9773g6kkgreg8d9ejwkfx",
+    "Ethereum": "0xdD3fD907D20fb2C8Ec16Bc6358301f258432998A",
     "PayPal": "13cmsk@gmail.com",
     "CashApp": "$kjfrm085"
 }
