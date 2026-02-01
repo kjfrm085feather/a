@@ -18,11 +18,11 @@ load_dotenv()
 
 # ============= CONFIGURATION SECTION =============
 DISCORD_BOT_TOKEN = ""  # Put your bot token here
-BOT_NAME = "Flow Cloud | VPS Core"
+BOT_NAME = "Vortex Nodes | VPS Core"
 BOT_VERSION = "V1"
-THUMBNAIL_IMAGE_URL = "https://cdn.discordapp.com/attachments/1452058738012848254/1452059353589747813/IMG_5369.png?ex=69486f27&is=69471da7&hm=daae4cd402f209d982894b6af84bed6fc178e2aa940f1d37caeaf88e768c8c86&"
-FOOTER_ICON_URL = "https://cdn.discordapp.com/attachments/1452058738012848254/1452059353589747813/IMG_5369.png?ex=69486f27&is=69471da7&hm=daae4cd402f209d982894b6af84bed6fc178e2aa940f1d37caeaf88e768c8c86&"
-MESSAGES_GIF_URL = "https://cdn.discordapp.com/attachments/1452058738012848254/1452059353589747813/IMG_5369.png?ex=69486f27&is=69471da7&hm=daae4cd402f209d982894b6af84bed6fc178e2aa940f1d37caeaf88e768c8c86&"
+THUMBNAIL_IMAGE_URL = "https://cdn.discordapp.com/attachments/1467306702742229100/1467308441017123122/54483db9-3607-464c-b6ec-806f20f6e7a1.png?ex=697fe8f9&is=697e9779&hm=f06c579bfc4bc67c0fdc00a7579dde65ed548cd00b624867b0c617f746348335"
+FOOTER_ICON_URL = "https://cdn.discordapp.com/attachments/1467306702742229100/1467308441017123122/54483db9-3607-464c-b6ec-806f20f6e7a1.png?ex=697fe8f9&is=697e9779&hm=f06c579bfc4bc67c0fdc00a7579dde65ed548cd00b624867b0c617f746348335"
+MESSAGES_GIF_URL = "https://cdn.discordapp.com/attachments/1467306702742229100/1467308441017123122/54483db9-3607-464c-b6ec-806f20f6e7a1.png?ex=697fe8f9&is=697e9779&hm=f06c579bfc4bc67c0fdc00a7579dde65ed548cd00b624867b0c617f746348335"
 
 # LXC Storage Pool
 DEFAULT_STORAGE_POOL = "default"
@@ -44,7 +44,7 @@ PAYMENT_METHODS = {
 }
 
 # Game Settings
-TIC_TAC_TOE_REWARD = 50  # Credits for winning tic-tac-toe
+TIC_TAC_TOE_REWARD = 10  # Credits for winning tic-tac-toe
 # ============= END CONFIGURATION =============
 
 # Configure logging
@@ -63,8 +63,8 @@ intents.members = True
 bot = commands.Bot(command_prefix='.', intents=intents, help_command=None)
 
 # Main admin user ID
-MAIN_ADMIN_ID = 1061287786755395585
-VPS_USER_ROLE_ID = 1452060173115064462
+MAIN_ADMIN_ID = 1383641747913183256
+VPS_USER_ROLE_ID = 1467306701102518287
 CPU_THRESHOLD = 90
 CHECK_INTERVAL = 60
 cpu_monitor_active = True
@@ -76,10 +76,10 @@ MESSAGE_THRESHOLD = 50
 
 # Plans & Pricing
 PLANS = {
-    "Starter": {"ram": "4GB", "cpu": "1", "storage": 20, "price_intel": 42, "price_amd": 83},
-    "Basic": {"ram": "8GB", "cpu": "1", "storage": 30, "price_intel": 96, "price_amd": 164},
-    "Standard": {"ram": "12GB", "cpu": "2", "storage": 50, "price_intel": 192, "price_amd": 320},
-    "Pro": {"ram": "16GB", "cpu": "2", "storage": 80, "price_intel": 220, "price_amd": 340}
+    "Starter": {"ram": "4GB", "cpu": "1", "storage": 20, "price_intel": 1, "price_amd": 2},
+    "Basic": {"ram": "8GB", "cpu": "1", "storage": 30, "price_intel": 3, "price_amd": 5},
+    "Standard": {"ram": "12GB", "cpu": "2", "storage": 50, "price_intel": 7, "price_amd": 10},
+    "Pro": {"ram": "16GB", "cpu": "2", "storage": 80, "price_intel": 10, "price_amd": 15}
 }
 
 # JSON helpers
