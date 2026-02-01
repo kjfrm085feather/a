@@ -300,7 +300,19 @@ async def set_root_disk_size(container_name: str, size_gb: int):
             "if command -v resize2fs >/dev/null 2>&1; then resize2fs /dev/sda1 || true; fi; "
             "if command -v xfs_growfs >/dev/null 2>&1; then xfs_growfs / || true; fi"
         )
-        await execute_lxc(f"lxc exec {container_name} -- bash -lc \"{cmd}\"", timeout=240)
+        # Try a reasonable synchronous timeout first (may finish quickly on small images)
+        try:
+            await execute_lxc(f"lxc exec {container_name} -- bash -lc \"{cmd}\"", timeout=60)
+            return
+        except Exception:
+            # If the operation times out or fails, run it in background so creation doesn't block
+            bg_cmd = f"bash -lc '{cmd} > /var/log/vortex_resize.log 2>&1 &'"
+            try:
+                await execute_lxc(f"lxc exec {container_name} -- {bg_cmd}", timeout=10)
+                logger.info(f"Started background resize for {container_name}, continuing creation.")
+                return
+            except Exception as e:
+                logger.warning(f"Failed to start background resize for {container_name}: {e}")
     except Exception as e:
         logger.warning(f"Automatic filesystem grow may have failed in {container_name}: {e}")
 
@@ -1062,38 +1074,33 @@ async def manage_vps(ctx, member: discord.Member = None):
                 
                 processing_embed.description = "Generating SSH session..."
                 await message.edit(embed=processing_embed)
-                
-                # Start tmate and get SSH link
-                tmate_cmd = "tmate -F 2>&1 | grep -m1 'ssh session:' || tmate -F 2>&1 | head -20"
-                result = await execute_lxc(f"lxc exec {container_name} -- bash -c '{tmate_cmd}'", timeout=30)
-                
-                # Extract SSH link
+
+                # Start a detached tmate session and fetch the SSH connection string without blocking
+                session_cmd = (
+                    "pkill tmate 2>/dev/null || true; "
+                    "rm -f /tmp/tmate.sock /tmp/tmate.log 2>/dev/null || true; "
+                    "tmate -S /tmp/tmate.sock new-session -d || true; "
+                    "sleep 2; "
+                    "tmate -S /tmp/tmate.sock display -p '#{tmate_ssh}' || tmate -S /tmp/tmate.sock display -p '#{ssh}' || "
+                    "(tmate -F -n tmate_session > /tmp/tmate.log 2>&1 & sleep 5; cat /tmp/tmate.log | grep 'ssh session:' | head -1)"
+                )
+
+                # Use a modest timeout since this should be quick when detached
+                try:
+                    result = await execute_lxc(f"lxc exec {container_name} -- bash -lc \"{session_cmd}\"", timeout=20)
+                except Exception:
+                    result = ""
+
+                # Extract SSH link from result
                 ssh_link = None
-                for line in result.split('\n'):
-                    if 'ssh session:' in line.lower() or 'ssh ' in line:
-                        parts = line.split()
-                        for i, part in enumerate(parts):
-                            if part.startswith('ssh') and i + 1 < len(parts):
-                                ssh_link = ' '.join(parts[i:])
-                                break
-                        if ssh_link:
-                            break
-                
-                if not ssh_link:
-                    # Alternative method - create a persistent tmate session
-                    session_cmd = """
-                    pkill tmate 2>/dev/null || true
-                    rm -f /tmp/tmate.log
-                    tmate -F -n tmate_session > /tmp/tmate.log 2>&1 &
-                    sleep 5
-                    cat /tmp/tmate.log | grep 'ssh session:' | head -1
-                    """
-                    result = await execute_lxc(f"lxc exec {container_name} -- bash -c \"{session_cmd}\"", timeout=30)
-                    
+                if result:
                     for line in result.split('\n'):
-                        if 'ssh ' in line:
-                            ssh_link = line.strip()
-                            break
+                        if 'ssh session:' in line.lower() or 'ssh ' in line:
+                            # prefer the full ssh command substring
+                            line = line.strip()
+                            if line.startswith('ssh') or 'ssh ' in line:
+                                ssh_link = line
+                                break
                 
                 success_embed = create_success_embed(
                     "✅ SSH Access Ready!",
