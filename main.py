@@ -39,7 +39,7 @@ PAYMENT_ADDRESS = "0x5D20d7d185f0B83039BaBFf980F1755B5242C85B"
 PAYMENT_METHODS = {
     "Bitcoin": "bc1qfashd8xz6y84j5hd8ycnsx9x5fzujr952qctuz",
     "Ethereum": "0x5D20d7d185f0B83039BaBFf980F1755B5242C85B",
-    "PayPal": "starcoderealcrazy123@gmail.com",
+    "PayPal": "13cmsk@gmail.com",
     "CashApp": "$kjfrm085"
 }
 
