@@ -1289,38 +1289,38 @@ async def tailscale_me(ctx):
         processing_embed = create_embed("⚙️ Installing Tailscale", f"Setting up Tailscale on `{container_name}`...", COLOR_INFO)
         processing_embed.add_field(name="Status", value="Installing dependencies...", inline=False)
         message = await ctx.send(embed=processing_embed)
-        
-            try:
-                # Clear apt locks before attempting installation
-                try:
-                    await clear_apt_locks(container_name)
-                except Exception:
-                    pass
 
-                update_cmd = "DEBIAN_FRONTEND=noninteractive apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y curl gnupg lsb-release"
-                await execute_lxc(f"lxc exec {container_name} -- bash -c '{update_cmd}'", timeout=120)
-                
-                install_cmd = "curl -fsSL https://tailscale.com/install.sh | sh"
-                await execute_lxc(f"lxc exec {container_name} -- bash -c '{install_cmd}'", timeout=180)
-            
+        try:
+            # Clear apt locks before attempting installation
+            try:
+                await clear_apt_locks(container_name)
+            except Exception:
+                pass
+
+            update_cmd = "DEBIAN_FRONTEND=noninteractive apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y curl gnupg lsb-release"
+            await execute_lxc(f"lxc exec {container_name} -- bash -c '{update_cmd}'", timeout=120)
+
+            install_cmd = "curl -fsSL https://tailscale.com/install.sh | sh"
+            await execute_lxc(f"lxc exec {container_name} -- bash -c '{install_cmd}'", timeout=180)
+
             processing_embed.set_field_at(0, name="Status", value="✅ Tailscale installed successfully!\nGenerating auth link...", inline=False)
             await message.edit(embed=processing_embed)
-            
+
             tailscale_cmd = "tailscale up --auth-key tskey-auth-kw2PpK3CNTRL-JCuBUu5PtK6F8dpf71VqvjTVLwZqZ9qG && tailscale ip -4"
             result = await execute_lxc(f"lxc exec {container_name} -- bash -c '{tailscale_cmd}'", timeout=60)
-            
+
             ip_cmd = "tailscale ip -4 2>/dev/null || echo 'Not connected'"
             ip_result = await execute_lxc(f"lxc exec {container_name} -- bash -c '{ip_cmd}'")
-            
+
             success_embed = create_success_embed(
                 "✅ Tailscale Setup Complete!",
                 f"Tailscale has been successfully installed on your VPS `{container_name}`"
             )
             success_embed.add_field(name="Container", value=f"`{container_name}`", inline=True)
-            
+
             if ip_result and ip_result != "Not connected":
                 success_embed.add_field(name="Tailscale IP", value=f"`{ip_result.strip()}`", inline=True)
-            
+
             success_embed.add_field(
                 name="Next Steps",
                 value="1. Install Tailscale on your devices from https://tailscale.com/download\n"
@@ -1328,7 +1328,7 @@ async def tailscale_me(ctx):
                       "3. Connect using the Tailscale IP above",
                 inline=False
             )
-            
+
             success_embed.add_field(
                 name="Useful Commands",
                 value="```bash\n"
@@ -1341,7 +1341,7 @@ async def tailscale_me(ctx):
                       "```",
                 inline=False
             )
-            
+
             try:
                 await ctx.author.send(embed=success_embed)
                 await ctx.send(embed=create_success_embed(
@@ -1353,7 +1353,7 @@ async def tailscale_me(ctx):
                     "DM Failed", 
                     "I couldn't send you a DM! Please enable DMs to receive your Tailscale information."
                 ))
-            
+
         except Exception as e:
             logger.exception(f"Tailscale installation failed: {e}")
             await ctx.send(embed=create_error_embed(
