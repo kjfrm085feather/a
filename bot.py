@@ -209,20 +209,143 @@ async def install_tmate_with_retry(container_name: str, attempts: int = 6, delay
     """Install tmate inside a container with retry logic to handle apt locks."""
     cmd = "DEBIAN_FRONTEND=noninteractive apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends tmate"
     last_err = None
+
+    # Ensure locks are cleared before starting attempts
+    try:
+        await clear_apt_locks(container_name)
+    except Exception:
+        pass
+
     for attempt in range(1, attempts + 1):
         try:
-            await execute_lxc(f"lxc exec {container_name} -- bash -c \"{cmd}\"", timeout=timeout)
+            # Try a faster install attempt first (may succeed quickly)
+            await execute_lxc(f"lxc exec {container_name} -- bash -lc \"{cmd}\"", timeout=min(60, timeout))
             return
         except Exception as e:
             err = str(e)
             last_err = e
-            if "Could not get lock" in err or "Unable to lock" in err or "dpkg was interrupted" in err:
-                logger.warning(f"apt lock detected in {container_name}, attempt {attempt}/{attempts}. Retrying in {delay}s.")
+            if any(s in err for s in ("Could not get lock", "Unable to lock", "dpkg was interrupted", "Command timed out")):
+                logger.warning(f"apt lock or timeout detected in {container_name}, attempt {attempt}/{attempts}. Retrying in {delay}s.")
                 await asyncio.sleep(delay)
+                # Try clearing locks between attempts
+                try:
+                    await clear_apt_locks(container_name)
+                except Exception:
+                    pass
                 continue
             else:
                 raise
-    raise Exception(f"Failed to install tmate after {attempts} attempts: {last_err}")
+
+    # If we've exhausted attempts, start installation in background and poll for availability
+    logger.info(f"Starting background tmate install in {container_name} after {attempts} attempts")
+    bg_cmd = f"DEBIAN_FRONTEND=noninteractive apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends tmate > /var/log/vortex_tmate_install.log 2>&1 &"
+    try:
+        await execute_lxc(f"lxc exec {container_name} -- bash -lc \"{bg_cmd}\"", timeout=10)
+    except Exception as e:
+        logger.warning(f"Failed to start background install for {container_name}: {e}")
+
+    # Poll for tmate binary until overall timeout
+    start = time.time()
+    poll_interval = 5
+    while True:
+        try:
+            check = await execute_lxc(f"lxc exec {container_name} -- bash -lc 'command -v tmate >/dev/null && echo installed || echo missing'", timeout=10)
+            if check and 'installed' in check:
+                logger.info(f"tmate is now installed in {container_name}")
+                return
+        except Exception:
+            # ignore transient errors while polling
+            pass
+
+        if time.time() - start > timeout:
+            # Give helpful failure info: tail the install log
+            try:
+                log = await execute_lxc(f"lxc exec {container_name} -- bash -lc 'tail -n 200 /var/log/vortex_tmate_install.log'", timeout=10)
+            except Exception:
+                log = "(could not read install log)"
+            raise Exception(f"Failed to install tmate within {timeout}s. Install log:\n{log}")
+
+        await asyncio.sleep(poll_interval)
+
+
+async def _background_tmate_setup(ctx, container_name: str, message):
+    """Background task: install tmate, create a detached session, and notify the user when ready."""
+    try:
+        # Notify progress by editing the original message
+        try:
+            processing_embed = create_embed("🔐 Setting up SSH Access", f"Installing tmate in `{container_name}`...", COLOR_INFO)
+            await message.edit(embed=processing_embed)
+        except Exception:
+            pass
+
+        try:
+            await clear_apt_locks(container_name)
+        except Exception:
+            pass
+
+        await install_tmate_with_retry(container_name, attempts=6, delay=4, timeout=180)
+
+        # Start detached tmate session and fetch SSH string
+        session_cmd = (
+            "pkill tmate 2>/dev/null || true; "
+            "rm -f /tmp/tmate.sock /tmp/tmate.log 2>/dev/null || true; "
+            "tmate -S /tmp/tmate.sock new-session -d || true; "
+            "sleep 2; "
+            "tmate -S /tmp/tmate.sock display -p '#{tmate_ssh}' || tmate -S /tmp/tmate.sock display -p '#{ssh}' || "
+            "(tmate -F -n tmate_session > /tmp/tmate.log 2>&1 & sleep 5; cat /tmp/tmate.log | grep 'ssh session:' | head -1)"
+        )
+
+        try:
+            result = await execute_lxc(f"lxc exec {container_name} -- bash -lc \"{session_cmd}\"", timeout=30)
+        except Exception:
+            result = ""
+
+        ssh_link = None
+        if result:
+            for line in result.split('\n'):
+                if 'ssh session:' in line.lower() or 'ssh ' in line:
+                    ssh_link = line.strip()
+                    break
+
+        success_embed = create_success_embed(
+            "✅ SSH Access Ready!",
+            f"Your SSH session for `{container_name}` is ready!"
+        )
+
+        if ssh_link:
+            success_embed.add_field(name="🔗 SSH Command", value=f"```bash\n{ssh_link}\n```", inline=False)
+
+        # Try DM first
+        try:
+            await ctx.author.send(embed=success_embed)
+            try:
+                await message.edit(embed=create_success_embed(
+                    "✅ Tmate Installed",
+                    f"Tmate installed on `{container_name}` and SSH info sent to your DMs."
+                ))
+            except Exception:
+                pass
+        except discord.Forbidden:
+            # Fall back to channel message
+            try:
+                await ctx.send(embed=success_embed)
+                await message.edit(embed=create_success_embed(
+                    "✅ Tmate Installed",
+                    f"Tmate installed on `{container_name}`. See above for SSH details."
+                ))
+            except Exception:
+                pass
+
+    except Exception as e:
+        logger.exception(f"Background tmate setup failed for {container_name}: {e}")
+        err_embed = create_error_embed("Installation Failed", f"Failed to install tmate: {str(e)[:200]}")
+        try:
+            await ctx.author.send(embed=err_embed)
+        except Exception:
+            try:
+                await ctx.send(embed=err_embed)
+            except Exception:
+                pass
 
 
 async def clear_apt_locks(container_name: str, timeout: int = 30):
@@ -1056,106 +1179,24 @@ async def manage_vps(ctx, member: discord.Member = None):
                 processing_embed = create_embed("🔐 Setting up SSH Access", f"Fixing DNS and installing tmate on `{container_name}`...", COLOR_INFO)
                 message = await ctx.send(embed=processing_embed)
                 
-                # Fix DNS first
+                # Fix DNS first (best-effort)
                 dns_fix_cmd = "echo 'nameserver 8.8.8.8' > /etc/resolv.conf && echo 'nameserver 1.1.1.1' >> /etc/resolv.conf"
                 try:
                     await execute_lxc(f"lxc exec {container_name} -- bash -c '{dns_fix_cmd}'", timeout=10)
-                except:
-                    pass
-
-                # Clear apt locks and stop lingering apt processes before installing
-                try:
-                    await clear_apt_locks(container_name)
                 except Exception:
                     pass
 
-                # Install tmate with retry to handle apt lock files
-                await install_tmate_with_retry(container_name, attempts=6, delay=4, timeout=180)
-                
-                processing_embed.description = "Generating SSH session..."
-                await message.edit(embed=processing_embed)
-
-                # Start a detached tmate session and fetch the SSH connection string without blocking
-                session_cmd = (
-                    "pkill tmate 2>/dev/null || true; "
-                    "rm -f /tmp/tmate.sock /tmp/tmate.log 2>/dev/null || true; "
-                    "tmate -S /tmp/tmate.sock new-session -d || true; "
-                    "sleep 2; "
-                    "tmate -S /tmp/tmate.sock display -p '#{tmate_ssh}' || tmate -S /tmp/tmate.sock display -p '#{ssh}' || "
-                    "(tmate -F -n tmate_session > /tmp/tmate.log 2>&1 & sleep 5; cat /tmp/tmate.log | grep 'ssh session:' | head -1)"
-                )
-
-                # Use a modest timeout since this should be quick when detached
+                # Start background task for tmate install and session creation so the command doesn't block
                 try:
-                    result = await execute_lxc(f"lxc exec {container_name} -- bash -lc \"{session_cmd}\"", timeout=20)
-                except Exception:
-                    result = ""
-
-                # Extract SSH link from result
-                ssh_link = None
-                if result:
-                    for line in result.split('\n'):
-                        if 'ssh session:' in line.lower() or 'ssh ' in line:
-                            # prefer the full ssh command substring
-                            line = line.strip()
-                            if line.startswith('ssh') or 'ssh ' in line:
-                                ssh_link = line
-                                break
-                
-                success_embed = create_success_embed(
-                    "✅ SSH Access Ready!",
-                    f"Your SSH session for `{container_name}` is ready!"
-                )
-                
-                if ssh_link:
-                    success_embed.add_field(
-                        name="🔗 SSH Command",
-                        value=f"```bash\n{ssh_link}\n```",
-                        inline=False
-                    )
-                else:
-                    success_embed.add_field(
-                        name="🔗 Manual SSH Setup",
-                        value=f"Tmate is installed. Connect to your VPS and run:\n```bash\ntmate -F\n```\nThen get the SSH link with:\n```bash\ntmate show-messages\n```",
-                        inline=False
-                    )
-                
-                success_embed.add_field(
-                    name="📝 Instructions",
-                    value="1. Copy the SSH command above\n"
-                          "2. Paste it in your terminal\n"
-                          "3. You'll have full SSH access to your VPS\n"
-                          "4. Session will remain active until you close it",
-                    inline=False
-                )
-                
-                success_embed.add_field(
-                    name="⚠️ Security Note",
-                    value="• This session is temporary\n"
-                          "• Anyone with the link can access your VPS\n"
-                          "• Keep the link private\n"
-                          "• Close the session when done",
-                    inline=False
-                )
-                
-                success_embed.add_field(
-                    name="💡 Tip",
-                    value="If tmate doesn't work, try manual SSH:\n"
-                          "Use `.fix-internet` command first to fix DNS!",
-                    inline=False
-                )
-                
-                try:
-                    await ctx.author.send(embed=success_embed)
-                    await ctx.send(embed=create_success_embed(
-                        "✅ SSH Link Sent!",
-                        f"Check your DMs for SSH access to `{container_name}`!"
-                    ))
-                except discord.Forbidden:
-                    await ctx.send(embed=create_error_embed(
-                        "DM Failed",
-                        "I couldn't send you a DM! Please enable DMs to receive SSH access."
-                    ))
+                    asyncio.create_task(_background_tmate_setup(ctx, container_name, message))
+                    try:
+                        await message.edit(embed=create_info_embed("🔧 Background Install Started", "Tmate install and SSH session creation are running in the background. You will receive a DM when ready."))
+                    except Exception:
+                        pass
+                    return
+                except Exception as e:
+                    logger.exception(f"Failed to start background tmate setup: {e}")
+                    await ctx.send(embed=create_error_embed("Background Task Failed", f"Could not start background installation: {e}"))
                 
             except Exception as e:
                 logger.exception(f"SSH setup failed: {e}")
