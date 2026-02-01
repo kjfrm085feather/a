@@ -6,8 +6,8 @@ import asyncio
 import os
 
 # ───────── CONFIG ─────────
-TOKEN = "PUT_BOT_TOKEN_HERE"
-ADMIN_ID = 123456789012345678  # Replace with your Discord ID
+TOKEN = "MTQ2NzMxMDQyNDg3Njc4MTY0Mg.GUJk0Z.lpCj1JX8TfUuVoWG7kV1n_tYfE0SnrR6oTdGj"
+ADMIN_ID = 1383641747913183256 # Replace with your Discord ID
 
 # ───────── BOT SETUP ─────────
 intents = discord.Intents.default()
