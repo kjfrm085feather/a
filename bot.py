@@ -924,11 +924,13 @@ async def manage_vps(ctx, member: discord.Member = None):
         status_emoji = "🟢" if vps.get('status') == 'running' else "🔴"
         embed.add_field(
             name=f"#{i} {status_emoji} {vps.get('name', 'Unnamed')}",
-            value=f"**Plan:** {vps.get('plan', 'N/A')}
-                  f"**Container:** `{vps['container_name']}`
-                  f"**Status:** {vps.get('status', 'unknown')}
-                  f"**OS:** {vps.get('os', vps.get('image', 'Unknown'))}\n"
-                  f"**Specs:** {vps.get('ram', 'N/A')} RAM, {vps.get('cpu', 'N/A')} CPU, {vps.get('storage', 'N/A')}GB",
+            value=(
+                f"**Plan:** {vps.get('plan', 'N/A')}\n"
+                f"**Container:** `{vps['container_name']}`\n"
+                f"**Status:** {vps.get('status', 'unknown')}\n"
+                f"**OS:** {vps.get('os', vps.get('image', 'Unknown'))}\n"
+                f"**Specs:** {vps.get('ram', 'N/A')} RAM, {vps.get('cpu', 'N/A')} CPU, {vps.get('storage', 'N/A')}GB"
+            ),
             inline=False
         )
     
