@@ -17,7 +17,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # ============= CONFIGURATION SECTION =============
-DISCORD_BOT_TOKEN = ""  # Put your bot token here
+DISCORD_BOT_TOKEN = "MTQ2NzMxMDQyNDg3Njc4MTY0Mg.GUJk0Z.lpCj1JX8TfUuVoWG7kV1n_tYfE0SnrR6oTdGj"  # Put your bot token here
 BOT_NAME = "Vortex Nodes | VPS Core"
 BOT_VERSION = "V1"
 THUMBNAIL_IMAGE_URL = "https://cdn.discordapp.com/attachments/1467306702742229100/1467308441017123122/54483db9-3607-464c-b6ec-806f20f6e7a1.png?ex=697fe8f9&is=697e9779&hm=f06c579bfc4bc67c0fdc00a7579dde65ed548cd00b624867b0c617f746348335"
