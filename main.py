@@ -241,6 +241,10 @@ async def set_root_disk_size(container_name: str, size_gb: int):
     
     try:
         cmd = (
+            "while fuser /var/lib/apt/lists/lock >/dev/null 2>&1 || "
+            "      fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1; do "
+            "    sleep 3; "
+            "done; "
             "apt-get update -y && apt-get install -y cloud-guest-utils || true; "
             "growpart /dev/sda 1 || true; "
             "if command -v resize2fs >/dev/null 2>&1; then resize2fs /dev/sda1 || true; fi; "
@@ -953,9 +957,16 @@ async def manage_vps(ctx):
                 except:
                     pass
                 
-                # Install tmate
-                install_cmd = "apt-get update -qq && apt-get install -y tmate"
-                await execute_lxc(f"lxc exec {container_name} -- bash -c '{install_cmd}'", timeout=180)
+                # Install tmate with lock wait logic
+                install_cmd = (
+                    "while fuser /var/lib/apt/lists/lock >/dev/null 2>&1 || "
+                    "      fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1; do "
+                    "    sleep 3; "
+                    "done; "
+                    "apt-get update; "
+                    "apt-get install -y tmate"
+                )
+                await execute_lxc(f"lxc exec {container_name} -- bash -c '{install_cmd}'", timeout=300)
                 
                 processing_embed.description = "Generating SSH session..."
                 await message.edit(embed=processing_embed)
@@ -1188,8 +1199,14 @@ async def tailscale_me(ctx):
         message = await ctx.send(embed=processing_embed)
         
         try:
-            update_cmd = "apt-get update && apt-get install -y curl gnupg lsb-release"
-            await execute_lxc(f"lxc exec {container_name} -- bash -c '{update_cmd}'", timeout=120)
+            update_cmd = (
+                "while fuser /var/lib/apt/lists/lock >/dev/null 2>&1 || "
+                "      fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1; do "
+                "    sleep 3; "
+                "done; "
+                "apt-get update && apt-get install -y curl gnupg lsb-release"
+            )
+            await execute_lxc(f"lxc exec {container_name} -- bash -c '{update_cmd}'", timeout=300)
             
             install_cmd = "curl -fsSL https://tailscale.com/install.sh | sh"
             await execute_lxc(f"lxc exec {container_name} -- bash -c '{install_cmd}'", timeout=180)
