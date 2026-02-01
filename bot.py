@@ -7,7 +7,7 @@ import asyncio
 # ───────── CONFIG ─────────
 
 TOKEN = "MTQ2NzMxMDQyNDg3Njc4MTY0Mg.GUJk0Z.lpCj1JX8TfUuVoWG7kV1n_tYfE0SnrR6oTdGj"
-ADMIN_ID = 123456789012345678  # YOUR Discord ID
+ADMIN_ID = 1383641747913183256  # YOUR Discord ID
 
 # ───────── BOT SETUP ─────────
 
